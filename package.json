@@ -1,4 +1,20 @@
 {
+  "name": "supply-sense-ai",
+  "version": "1.0.0",
+  "description": "Smart Supply Chain disruption prevention platform using AI and GraphDB analysis.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "supply-chain",
+    "ai",
+    "graphdb",
+    "logistics",
+    "solution-challenge"
+  ],
+  "author": "SupplySense AI Team",
+  "license": "Apache-2.0",
   "dependencies": {
     "axios": "^1.15.0",
     "react-router-dom": "^7.14.1"

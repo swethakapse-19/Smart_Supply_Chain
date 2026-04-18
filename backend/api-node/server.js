@@ -4,6 +4,7 @@
 const express  = require('express');
 const cors     = require('cors');
 const mongoose = require('mongoose');
+const neo4j    = require('neo4j-driver');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;   // Cloud Run sets PORT automatically
@@ -38,6 +39,21 @@ if (MONGO_URI) {
   mongoose.connect(MONGO_URI)
     .then(() => console.log('✅  MongoDB connected'))
     .catch(err => console.warn('⚠️   MongoDB connection failed:', err.message));
+}
+
+// ── Neo4j GraphDB connect (optional) ─────────────────────────────────────────
+const NEO4J_URI      = process.env.NEO4J_URI || 'bolt://localhost:7687';
+const NEO4J_USER     = process.env.NEO4J_USER || 'neo4j';
+const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD || '';
+
+let driver;
+try {
+  if (NEO4J_PASSWORD) {
+    driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
+    console.log('🔗  Neo4j Driver initialized');
+  }
+} catch (err) {
+  console.warn('⚠️   Neo4j Driver failed to initialize:', err.message);
 }
 
 // ── Mongoose Schemas (used if MongoDB is connected) ──────────────────────────
@@ -198,36 +214,101 @@ app.get('/api/dashboard', async (req, res) => {
   }
 });
 
-// ── DEMAND FORECAST ───────────────────────────────────────────────────────────
-app.get('/api/demand', (req, res) => {
-  const generateForecast = (base) =>
-    ['Oct','Nov','Dec','Jan','Feb','Mar','Apr','May'].map((m, i) => ({
-      period:   m,
-      actual:   i < 4 ? Math.round(base * (0.7 + Math.random() * 0.5)) : null,
-      forecast: i >= 3 ? Math.round(base * (1 + (i - 3) * 0.08)) : null,
-    }));
+// ── GRAPH DB ENDPOINTS ───────────────────────────────────────────────────────
 
-  res.json({
-    products: [
-      { id: '1', name: 'MacBook Pro 14"',   forecast: generateForecast(18) },
-      { id: '2', name: 'Samsung 4K Monitor', forecast: generateForecast(12) },
-      { id: '3', name: 'Vitamin C 1000mg',   forecast: generateForecast(40) },
-      { id: '4', name: 'Organic Green Tea',  forecast: generateForecast(30) },
-    ],
-  });
+// 1. Seed the Graph (Manual Sync)
+app.post('/api/graph/seed', async (req, res) => {
+  if (!driver) return res.status(503).json({ error: 'Neo4j driver not initialized' });
+  const session = driver.session();
+  try {
+    // Clear and Seed
+    await session.run(`
+      MATCH (n) DETACH DELETE n;
+    `);
+    
+    // Create Cities and Warehouses
+    await session.run(`
+      CREATE (mumbai:City {name: 'Mumbai', id: 'MUM'})
+      CREATE (pune:City {name: 'Pune', id: 'PUN'})
+      CREATE (hyd:City {name: 'Hyderabad', id: 'HYD'})
+      CREATE (blr:City {name: 'Bangalore', id: 'BLR'})
+      
+      CREATE (wh1:Warehouse {id: 'WH-WEST', name: 'Western Hub'})
+      CREATE (wh2:Warehouse {id: 'WH-SOUTH', name: 'Southern Hub'})
+      
+      CREATE (wh1)-[:LOCATED_IN]->(mumbai)
+      CREATE (wh2)-[:LOCATED_IN]->(hyd)
+      
+      CREATE (mumbai)-[:CONNECTED_TO {distance: 150}]->(pune)
+      CREATE (pune)-[:CONNECTED_TO {distance: 700}]->(hyd)
+      CREATE (hyd)-[:CONNECTED_TO {distance: 570}]->(blr)
+    `);
+
+    // Link Products to Warehouses
+    for (const p of inMemoryProducts) {
+      const wh = p.category === 'Electronics' ? 'WH-WEST' : 'WH-SOUTH';
+      await session.run(`
+        MATCH (wh:Warehouse {id: $wh_id})
+        CREATE (prod:Product {id: $pid, name: $name, sku: $sku})
+        CREATE (prod)-[:STOCKED_IN]->(wh)
+      `, { wh_id: wh, pid: p._id, name: p.name, sku: p.sku });
+    }
+
+    res.json({ message: '✅ Graph Seeded Successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    await session.close();
+  }
 });
 
-app.get('/api/demand/:productId', (req, res) => {
-  const bases = { '1': 18, '2': 12, '3': 40, '4': 30, '5': 22 };
-  const base  = bases[req.params.productId] || 20;
-  res.json({
-    productId: req.params.productId,
-    forecast: ['Oct','Nov','Dec','Jan','Feb','Mar','Apr','May'].map((m, i) => ({
-      period:   m,
-      actual:   i < 4 ? Math.round(base * (0.7 + Math.random() * 0.5)) : null,
-      forecast: i >= 3 ? Math.round(base * (1 + (i - 3) * 0.08)) : null,
-    })),
-  });
+// 2. Cascade Analysis (Disruption Forecasting)
+app.get('/api/graph/cascade/:cityId', async (req, res) => {
+  if (!driver) return res.status(503).json({ error: 'Neo4j driver not initialized' });
+  const session = driver.session();
+  try {
+    const cityId = req.params.cityId.toUpperCase();
+    const result = await session.run(`
+      MATCH (disrupted:City {id: $cityId})
+      OPTIONAL MATCH (disrupted)<-[:LOCATED_IN]-(wh:Warehouse)
+      OPTIONAL MATCH (wh)<-[:STOCKED_IN]-(p:Product)
+      RETURN disrupted.name as city, collect(distinct wh.name) as hubs, collect(distinct p.name) as impactedProducts
+    `, { cityId });
+
+    const record = result.records[0];
+    res.json({
+      disruptedCity: record.get('city'),
+      impactedHubs: record.get('hubs'),
+      atRiskProducts: record.get('impactedProducts'),
+      severity: record.get('hubs').length > 0 ? 'CRITICAL' : 'LOW'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// 3. Get Network (for visualization)
+app.get('/api/graph/network', async (req, res) => {
+  if (!driver) return res.status(503).json({ error: 'Neo4j driver not initialized' });
+  const session = driver.session();
+  try {
+    const result = await session.run(`
+      MATCH (n)-[r]->(m)
+      RETURN n, type(r) as rel, m
+    `);
+    const network = result.records.map(rec => ({
+      from: rec.get('n').properties.name || rec.get('n').properties.id,
+      to: rec.get('m').properties.name || rec.get('m').properties.id,
+      type: rec.get('rel')
+    }));
+    res.json(network);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    await session.close();
+  }
 });
 
 // ── Start server ──────────────────────────────────────────────────────────────
