@@ -1,0 +1,12 @@
+# Git ignore for Smart Supply Chain
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.local
+dist/
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/

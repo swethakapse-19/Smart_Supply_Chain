@@ -1,0 +1,26 @@
+services:
+  # ── Node.js Data Backend ─────────────────────────────────
+  - type: web
+    name: supply-chain-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production
+    plan: free
+
+  # ── Python FastAPI AI Backend ─────────────────────────────
+  - type: web
+    name: supply-chain-ai
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PORT
+        value: 10001
+    plan: free
