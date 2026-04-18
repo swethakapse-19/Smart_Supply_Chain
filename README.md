@@ -11,8 +11,8 @@
 ---
 
 ## 📺 Project Demo
-*   **Demo Video**: [Click here to watch the 2-minute pitch](#) *(Replace with your YouTube link)*
-*   **Live Dashboard**: [View Live Deployment](#) *(Replace with your Vercel/Render link)*
+*   **Demo Video**: [https://drive.google.com/file/d/1mR3aH2te_EI6qiIohSVsQVIfxtqu4Kyj/view?usp=drivesdk]
+*   **Live Dashboard**: [https://drive.google.com/file/d/1mR3aH2te_EI6qiIohSVsQVIfxtqu4Kyj/view?usp=drivesdk]
 
 ---
 
